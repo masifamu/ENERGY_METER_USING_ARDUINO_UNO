@@ -44,7 +44,7 @@ uint32_t timeCount=0;
 uint8_t readValue = 0;
 uint16_t eepromAdd = 0;
 volatile uint16_t V=0,I=0,maxI=0,noOfHSCuts=0,RPM=0;
-float Vv=0.0,Iv=0.0,maxIv=0.0,P=0.0,E=0.0,dist=0.0;
+float Vv=0.0,Iv=0.0,maxIv=0.0,P=0.0,E=0.0,dist=0.0,battWireV=0.0;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
@@ -53,7 +53,6 @@ void setup() {
   //setting the ADC
   InitADC();
 
-  
   // SSD1306_SWITCHCAPVCC = generate display voltage from 3.3V internally
   if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { // Address 0x3D for 128x64
     Serial.println(F("SSD1306 allocation failed"));
@@ -70,18 +69,25 @@ void setup() {
   display.display();
   delay(3000);
 
-
-  
+  //deciding the reading factor
+  battWireV = ReadADC(0)*vPerDiv*11.0f;
+  Serial.println(battWireV);
   //routine for reading the data
-  if(Serial){
-    Serial.println("To read write     :R");
+  //if batt wire voltage is higher than 10V meaning that the batt is connected to the device
+  //if batt wire voltage is less thatn 10v meaning that the device is not connected to batt or being ready to read 
+  //the stored eeprom data
+  if(battWireV < 10.0f){
+    displayCheckWireConnectionAndReboot();
+    Serial.println("To read stored data, write :R");
     while(1){
-      readValue = Serial.read();
-      if(readValue == 'R'){//write R to read the data
-        Serial.println("Reading stored data,Please wait........");
-        while(eepromAdd++ <= 1023){Serial.print(eepromAdd); Serial.print(": "); Serial.println(EEPROM.read(eepromAdd));}
-        Serial.println("Done reading");
-        break;
+      if(Serial.available()){
+        readValue = Serial.read();
+        if(readValue == 'R'){//write R to read the data
+          Serial.println("Reading stored data,Please wait........");
+          while(eepromAdd++ <= 1023){Serial.print(eepromAdd); Serial.print(": "); Serial.println(EEPROM.read(eepromAdd));}
+          Serial.println("Done reading");
+          displayReadingDonePowerOff();
+        }
       }
     }
   }
@@ -95,15 +101,21 @@ void loop() {
   Serial.print("Current: ");Serial.println(Iv);
   Serial.print("Voltage: ");Serial.println(Vv);
  
-  maxIv = (maxI*vPerDiv - 2.47);//default sensor value is 2.49V
-  maxIv = (maxIv >= 0)? (maxIv-0.02):(-maxIv+0.02);//1000/66=15.151515
-  maxIv = maxIv*15.15151515f;
+  maxIv = (maxI*vPerDiv - 2.51);//default sensor value is 2.49V
+  if(maxIv < 0) maxIv = -maxIv;
+  maxIv = maxIv*15.15151515f;//1000/66=15.151515
   
   Serial.print("MaxI: ");Serial.println(maxIv);
   //before writing the data to EEPROM make sure no serial comm is available.
-  if(readValue != 'R'){
-  // put your main code here, to run repeatedly:
-  Serial.println("Writing data to EEPROM");
+  //not equal to R means eeprom is not read before because batt voltage was more than 10V
+  //here Vv is less than 10V means Wire was previously connected but now it's disconnected.
+  if(readValue != 'R' && Vv < 10.0f && timeCount >=10){
+    //Now we can store the data.
+    displayString("  Storing","   data");
+    delay(2000);
+    //Write storing data to eeprom commands here
+    displayString("  Stored     data","   Turn   Power off!");
+    while(1);
   }
   
   //updating the display here
@@ -143,12 +155,31 @@ void displayString(String s1, String s2){
   display.setTextSize(2); 
   display.println(s1);//total power
   display.println(s2);//total power
-  display.println(F("Error"));//total power
   display.display();
 }
 
+void displayCheckWireConnectionAndReboot(){
+  display.clearDisplay();
+  display.setTextColor(BLACK, WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
 
+  display.setTextColor(WHITE); 
+  display.setTextSize(2); 
+  display.println(F("Check WireConnection    and"));//total power
+  display.println(F("  Reboot!"));//total power
+  display.display();
+}
+void displayReadingDonePowerOff(){
+  display.clearDisplay();
+  display.setTextColor(BLACK, WHITE);        // Draw white text
+  display.setCursor(0,0);             // Start at top-left corner
 
+  display.setTextColor(WHITE); 
+  display.setTextSize(2); 
+  display.println(F("  Reading done,Turn"));//total power
+  display.println(F("Power off!"));//total power
+  display.display();
+}
 
 void setupTimerOneInterrupt(){//at every second
   cli();
@@ -212,13 +243,22 @@ ISR(TIMER2_COMPA_vect){//timer1 interrupt at every 16msec
     }
     select=0;
   }
+  //calculating voltage
   Vv = V*vPerDiv*11.0f;
-  
-  Iv = (I*vPerDiv - 2.47);//default sensor value is 2.49V
-  Iv = (Iv >= 0)? (Iv-0.02):(-Iv+0.02);//1000/66=15.151515
-  Iv = Iv*15.15151515f;
-  
+
+  //calculating current
+  //I*vPerDiv=is coming out to be equal to 2.49 or 2.50 when there is no current flowing.
+  //when charging subtract 2.51 then there will be max error of 0.02*15.151515=0.3030 amp
+  //while charging reading less. Always add in the result to get the actual value.
+  //While dischargin reading more, always subtract error from the result to get the actual value.
+  Iv = (I*vPerDiv - 2.51);//default sensor value is 2.49V
+  if(Iv < 0) Iv = -Iv;  //checking if the current is in negative direction.
+  Iv = Iv*15.15151515f;//1000/66=15.151515
+
+  //calculating power
   P = Vv*Iv;
+  
+  //calculating energy consumed
   E += P*0.00000444444f;//P*(16/1000)/60/60=P*0.00000444444
 }
 
