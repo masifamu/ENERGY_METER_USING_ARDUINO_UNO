@@ -35,15 +35,20 @@ static const unsigned char PROGMEM logo_bmp[] =
   B01110000, B01110000,
   B00000000, B00110000 };
 
+#define vPerDiv     0.0048828125
+#define wheelDia    0.65//meters
+#define noOfHSCutsPerRev  266
+
+int hall_signal=2;
 uint32_t timeCount=0;
 uint8_t readValue = 0;
 uint16_t eepromAdd = 0;
-volatile uint16_t V=0,I=0;
-float Vv=0.0,Iv=0.0,P=0.0,E=0.0;
+volatile uint16_t V=0,I=0,maxI=0,noOfHSCuts=0,RPM=0;
+float Vv=0.0,Iv=0.0,maxIv=0.0,P=0.0,E=0.0,dist=0.0;
 void setup() {
   // put your setup code here, to run once:
   Serial.begin(115200);
-
+  pinMode(hall_signal, INPUT_PULLUP);
 
   //setting the ADC
   InitADC();
@@ -80,37 +85,37 @@ void setup() {
       }
     }
   }
+  attachInterrupt(digitalPinToInterrupt(hall_signal), counter, FALLING);
   setupTimerOneInterrupt();
   setupTimerTwoInterrupt();
 }
 
 void loop() {
 
-  //Reading the voltage
-  //V = V*(5.0f / 1024.0f) *11.0f;
-  Vv = V*(5.0f / 1024.0f) *11.0f;
-  Serial.println(V);
-
-  //Reading the current
-  //I = I*(5.0f / 1024.0f);
-  Iv = I*(5.0f / 1024.0f);
-  //calculating the instantaneous power
-  P=Vv*Iv;
-
+  Serial.print("Current: ");Serial.println(Iv);
+  Serial.print("Voltage: ");Serial.println(Vv);
+ 
+  maxIv = (maxI*vPerDiv - 2.47);//default sensor value is 2.49V
+  maxIv = (maxIv >= 0)? (maxIv-0.02):(-maxIv+0.02);//1000/66=15.151515
+  maxIv = maxIv*15.15151515f;
   
-  
-  
+  Serial.print("MaxI: ");Serial.println(maxIv);
   //before writing the data to EEPROM make sure no serial comm is available.
   if(readValue != 'R'){
   // put your main code here, to run repeatedly:
   Serial.println("Writing data to EEPROM");
   }
-  //updating the display every 2 seconds
-  testdrawstyles(Vv,0,Iv,0,P,E,timeCount/60,0/*voltage,distance,current,maxCurrent,instPower,totalPower,totalT,ch*/);
+  
+  //updating the display here
+  testdrawstyles(Vv,dist,Iv,maxIv,P,E,timeCount/60,RPM/*voltage,distance,current,maxCurrent,instPower,totalPower,totalT*/);
 }
 
+void counter() {
+  dist += 3.14f*wheelDia;
+  noOfHSCuts++;
+}
 
-void testdrawstyles(float v, float dist, float c, float maxC, float instP, float totalP, float totalT, unsigned char ch) {
+void testdrawstyles(float v, float dist, float c, float maxC, float instP, float totalP, float totalT,uint16_t rpm) {
   display.clearDisplay();
   display.setTextColor(BLACK, WHITE);        // Draw white text
   display.setCursor(0,0);             // Start at top-left corner
@@ -125,7 +130,7 @@ void testdrawstyles(float v, float dist, float c, float maxC, float instP, float
   display.print(int(instP));display.print(F("W "));//inst power
   display.print(int(totalT));display.println(F("M"));//total power
   display.print(totalP,1);display.print(F("WH "));//total power
-  display.print(char(ch));//printing the charging and discharging flag
+  display.print(RPM);//RPM
   display.display();
 }
 
@@ -163,7 +168,8 @@ void setupTimerOneInterrupt(){//at every second
 }
 ISR(TIMER1_COMPA_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
   timeCount++;
-  E += P/60.0f/60.0f;
+  RPM = noOfHSCuts*60;
+  noOfHSCuts = 0;
 }
 void setupTimerTwoInterrupt(){//at every 16ms
   //set timer2 interrupt at 8kHz
@@ -181,9 +187,10 @@ void setupTimerTwoInterrupt(){//at every 16ms
   TIMSK2 |= (1 << OCIE2A);
   sei();
 }
-ISR(TIMER2_COMPA_vect){//timer1 interrupt 8kHz toggles pin 9
+ISR(TIMER2_COMPA_vect){//timer1 interrupt at every 16msec
   static uint16_t Vavg,Iavg;
   static uint8_t countV,countI,select;
+  uint16_t temp=0;
   if(select == 0){
     if(++countV <=16){
       Vavg += ReadADC(0);
@@ -195,7 +202,9 @@ ISR(TIMER2_COMPA_vect){//timer1 interrupt 8kHz toggles pin 9
     select=1;
   }else{
     if(++countI <=16){
-      Iavg += ReadADC(2);
+      temp = ReadADC(2);
+      if(maxI < temp) maxI=temp;
+      Iavg += temp;
     }else{
       I = Iavg>>4;
       countI = 0;
@@ -203,6 +212,14 @@ ISR(TIMER2_COMPA_vect){//timer1 interrupt 8kHz toggles pin 9
     }
     select=0;
   }
+  Vv = V*vPerDiv*11.0f;
+  
+  Iv = (I*vPerDiv - 2.47);//default sensor value is 2.49V
+  Iv = (Iv >= 0)? (Iv-0.02):(-Iv+0.02);//1000/66=15.151515
+  Iv = Iv*15.15151515f;
+  
+  P = Vv*Iv;
+  E += P*0.00000444444f;//P*(16/1000)/60/60=P*0.00000444444
 }
 
 /*.....................................................................................................*/
