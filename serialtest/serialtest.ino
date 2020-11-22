@@ -40,9 +40,9 @@ static const unsigned char PROGMEM logo_bmp[] =
 #define noOfHSCutsPerRev  266
 
 int hall_signal=2;
-uint32_t timeCount=0;
+uint32_t timeCount=0,prevTime=0;
 uint8_t readValue = 0;
-uint16_t eepromAdd = 0;
+uint16_t eepromAdd = 0,eepromStoreAdd=0,sampleCount=0;
 volatile uint16_t V=0,I=0,maxI=0,noOfHSCuts=0,RPM=0;
 float Vv=0.0,Iv=0.0,maxIv=0.0,P=0.0,E=0.0,dist=0.0,battWireV=0.0;
 void setup() {
@@ -84,7 +84,7 @@ void setup() {
         readValue = Serial.read();
         if(readValue == 'R'){//write R to read the data
           Serial.println("Reading stored data,Please wait........");
-          while(eepromAdd++ <= 1023){Serial.print(eepromAdd); Serial.print(": "); Serial.println(EEPROM.read(eepromAdd));}
+          while(eepromAdd++ <= 1023){Serial.print(eepromAdd-1); Serial.print(": "); Serial.println(EEPROM.read(eepromAdd));}
           Serial.println("Done reading");
           displayReadingDonePowerOff();
         }
@@ -98,14 +98,14 @@ void setup() {
 
 void loop() {
 
-  Serial.print("Current: ");Serial.println(Iv);
-  Serial.print("Voltage: ");Serial.println(Vv);
+  //Serial.print("Current: ");Serial.println(Iv);
+  //Serial.print("Voltage: ");Serial.println(Vv);
  
   maxIv = (maxI*vPerDiv - 2.51);//default sensor value is 2.49V
   if(maxIv < 0) maxIv = -maxIv;
   maxIv = maxIv*15.15151515f;//1000/66=15.151515
   
-  Serial.print("MaxI: ");Serial.println(maxIv);
+  //Serial.print("MaxI: ");Serial.println(maxIv);
   //before writing the data to EEPROM make sure no serial comm is available.
   //not equal to R means eeprom is not read before because batt voltage was more than 10V
   //here Vv is less than 10V means Wire was previously connected but now it's disconnected.
@@ -113,11 +113,45 @@ void loop() {
     //Now we can store the data.
     displayString("  Storing","   data");
     delay(2000);
+    //here i am storing only E,time,dist parameters
+    //store the dist in two bytes (q,r)
+    EEPROM.write(1016,int(E)/255);
+    EEPROM.write(1017,int(E)%255);
+    //store the total time in two bytes (q,r)
+    EEPROM.write(1018,int(timeCount/60)/255);
+    EEPROM.write(1019,int(timeCount/60)%255);
+    //store the distance in two bytes(q,r)
+    EEPROM.write(1020,int(dist)/255);
+    EEPROM.write(1021,int(dist)%255);
     //Write storing data to eeprom commands here
     displayString("  Stored     data","   Turn   Power off!");
     while(1);
   }
-  
+  //store current,P,RPM dynamically every 2 seconds
+  if(timeCount%2 == 0 && timeCount != prevTime){
+    //storing the number of data samples stored in EEPROM, it will help in reading the data
+    EEPROM.write(0,++sampleCount);
+    //storing the data RPM
+    EEPROM.write(++eepromStoreAdd,int(RPM)/255);
+    EEPROM.write(++eepromStoreAdd,int(RPM)%255);
+    //storing the data RPM
+    EEPROM.write(++eepromStoreAdd,int(P)/255);
+    EEPROM.write(++eepromStoreAdd,int(P)%255);
+    //string the current
+    EEPROM.write(++eepromStoreAdd,int(I));
+    prevTime = timeCount;
+  }
+
+  //Printing every parameters
+  Serial.print("Voltage:");Serial.println(Vv);
+  Serial.print("Distance:");Serial.println(dist);
+  Serial.print("Current:");Serial.println(Iv);
+  Serial.print("MaxI:");Serial.println(maxIv);
+  Serial.print("Power:");Serial.println(P);
+  Serial.print("Energy:");Serial.println(E);
+  Serial.print("Time:");Serial.println(timeCount/60);
+  Serial.print("RPM:");Serial.println(RPM);
+
   //updating the display here
   testdrawstyles(Vv,dist,Iv,maxIv,P,E,timeCount/60,RPM/*voltage,distance,current,maxCurrent,instPower,totalPower,totalT*/);
 }
@@ -165,8 +199,8 @@ void displayCheckWireConnectionAndReboot(){
 
   display.setTextColor(WHITE); 
   display.setTextSize(2); 
-  display.println(F("Check WireConnection    and"));//total power
-  display.println(F("  Reboot!"));//total power
+  display.println(F("Check Wire& Reboot"));//total power
+  display.println(F("or Connectto PC"));//total power
   display.display();
 }
 void displayReadingDonePowerOff(){
