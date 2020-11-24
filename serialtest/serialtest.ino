@@ -71,11 +71,12 @@ void setup() {
 
   //deciding the reading factor
   battWireV = ReadADC(0)*vPerDiv*11.0f;
-  Serial.println(battWireV);
+  //Serial.println(battWireV);
   //routine for reading the data
   //if batt wire voltage is higher than 10V meaning that the batt is connected to the device
   //if batt wire voltage is less thatn 10v meaning that the device is not connected to batt or being ready to read 
   //the stored eeprom data
+  uint16_t storedSampCount=0,temporary=0;
   if(battWireV < 10.0f){
     displayCheckWireConnectionAndReboot();
     Serial.println("To read stored data, write :R");
@@ -83,8 +84,29 @@ void setup() {
       if(Serial.available()){
         readValue = Serial.read();
         if(readValue == 'R'){//write R to read the data
-          Serial.println("Reading stored data,Please wait........");
-          while(eepromAdd++ <= 1023){Serial.print(eepromAdd-1); Serial.print(": "); Serial.println(EEPROM.read(eepromAdd));}
+          
+          Serial.print("Voltage: ");Serial.print(EEPROM.read(1022));Serial.println("V");
+          Serial.print("Energy: ");Serial.print(EEPROM.read(1016)*255+EEPROM.read(1017));Serial.println("WH");
+          Serial.print("Time: ");Serial.print(EEPROM.read(1018)*255+EEPROM.read(1019));Serial.println("M");
+          Serial.print("Distance: ");Serial.print(EEPROM.read(1020)*255+EEPROM.read(1021));Serial.println("m");
+          //Serial.println(".....................................................");
+          storedSampCount=EEPROM.read(0)*5;//each sample is of 5 bytes
+          eepromAdd=0;//starting address where the RPM,P,I is stored
+          while(++eepromAdd <= storedSampCount){
+            //Serial.print(eepromAdd);Serial.println(EEPROM.read(eepromAdd));
+            
+            temporary = EEPROM.read(eepromAdd)*255;
+            temporary += EEPROM.read(++eepromAdd);
+            Serial.print("RPM: ");Serial.println(temporary);
+
+            temporary = EEPROM.read(++eepromAdd)*255;
+            temporary += EEPROM.read(++eepromAdd);
+            Serial.print("Inst Power: ");Serial.print(temporary);Serial.println("W");
+
+            temporary = EEPROM.read(++eepromAdd);
+            Serial.print("I: ");Serial.print(temporary);Serial.println("A");
+            
+          }
           Serial.println("Done reading");
           displayReadingDonePowerOff();
         }
@@ -97,15 +119,12 @@ void setup() {
 }
 
 void loop() {
-
-  //Serial.print("Current: ");Serial.println(Iv);
-  //Serial.print("Voltage: ");Serial.println(Vv);
- 
+  //calculating the max current.
   maxIv = (maxI*vPerDiv - 2.51);//default sensor value is 2.49V
-  if(maxIv < 0) maxIv = -maxIv;
+  if(maxIv < 0) maxIv = 0;
   maxIv = maxIv*15.15151515f;//1000/66=15.151515
-  
   //Serial.print("MaxI: ");Serial.println(maxIv);
+  
   //before writing the data to EEPROM make sure no serial comm is available.
   //not equal to R means eeprom is not read before because batt voltage was more than 10V
   //here Vv is less than 10V means Wire was previously connected but now it's disconnected.
@@ -114,7 +133,7 @@ void loop() {
     displayString("  Storing","   data");
     delay(2000);
     //here i am storing only E,time,dist parameters
-    //store the dist in two bytes (q,r)
+    //store the E in two bytes (q,r)
     EEPROM.write(1016,int(E)/255);
     EEPROM.write(1017,int(E)%255);
     //store the total time in two bytes (q,r)
@@ -123,34 +142,40 @@ void loop() {
     //store the distance in two bytes(q,r)
     EEPROM.write(1020,int(dist)/255);
     EEPROM.write(1021,int(dist)%255);
+
     //Write storing data to eeprom commands here
     displayString("  Stored     data","   Turn   Power off!");
     while(1);
   }
-  //store current,P,RPM dynamically every 2 seconds
-  if(timeCount%2 == 0 && timeCount != prevTime){
+  
+  //store current,P,RPM dynamically every 10 seconds
+  //5 bytes will be consumed every 10 seconds.
+  //1 byte every 2 sec, 1016byte in 1016*2/60=33.867min
+  if(timeCount%10 == 0 && timeCount != prevTime){
     //storing the number of data samples stored in EEPROM, it will help in reading the data
     EEPROM.write(0,++sampleCount);
     //storing the data RPM
     EEPROM.write(++eepromStoreAdd,int(RPM)/255);
     EEPROM.write(++eepromStoreAdd,int(RPM)%255);
-    //storing the data RPM
+    //storing the data inst Power
     EEPROM.write(++eepromStoreAdd,int(P)/255);
     EEPROM.write(++eepromStoreAdd,int(P)%255);
     //string the current
-    EEPROM.write(++eepromStoreAdd,int(I));
+    EEPROM.write(++eepromStoreAdd,int(Iv));
+    //storing voltage
+    EEPROM.write(1022,int(Vv));
     prevTime = timeCount;
   }
 
   //Printing every parameters
-  Serial.print("Voltage:");Serial.println(Vv);
-  Serial.print("Distance:");Serial.println(dist);
-  Serial.print("Current:");Serial.println(Iv);
-  Serial.print("MaxI:");Serial.println(maxIv);
-  Serial.print("Power:");Serial.println(P);
-  Serial.print("Energy:");Serial.println(E);
-  Serial.print("Time:");Serial.println(timeCount/60);
-  Serial.print("RPM:");Serial.println(RPM);
+  //Serial.print("Voltage:");Serial.println(Vv);
+  //Serial.print("Distance:");Serial.println(dist);
+  //Serial.print("Current:");Serial.println(Iv);
+  //Serial.print("MaxI:");Serial.println(maxIv);
+  //Serial.print("Power:");Serial.println(P);
+  //Serial.print("Energy:");Serial.println(E);
+  //Serial.print("Time:");Serial.println(timeCount/60);
+  //Serial.print("RPM:");Serial.println(RPM);
 
   //updating the display here
   testdrawstyles(Vv,dist,Iv,maxIv,P,E,timeCount/60,RPM/*voltage,distance,current,maxCurrent,instPower,totalPower,totalT*/);
@@ -233,8 +258,10 @@ void setupTimerOneInterrupt(){//at every second
 }
 ISR(TIMER1_COMPA_vect){//timer1 interrupt 1Hz toggles pin 13 (LED)
   timeCount++;
-  RPM = noOfHSCuts*60;
-  noOfHSCuts = 0;
+  if(timeCount%10 == 0){
+    RPM = noOfHSCuts*6;
+    noOfHSCuts = 0;
+  } 
 }
 void setupTimerTwoInterrupt(){//at every 16ms
   //set timer2 interrupt at 8kHz
@@ -286,7 +313,7 @@ ISR(TIMER2_COMPA_vect){//timer1 interrupt at every 16msec
   //while charging reading less. Always add in the result to get the actual value.
   //While dischargin reading more, always subtract error from the result to get the actual value.
   Iv = (I*vPerDiv - 2.51);//default sensor value is 2.49V
-  if(Iv < 0) Iv = -Iv;  //checking if the current is in negative direction.
+  if(Iv < 0) Iv = 0;  //checking if the current is in negative direction.
   Iv = Iv*15.15151515f;//1000/66=15.151515
 
   //calculating power
