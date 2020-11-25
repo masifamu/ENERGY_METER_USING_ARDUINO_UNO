@@ -152,21 +152,23 @@ void loop() {
   //5 bytes will be consumed every 10 seconds.
   //1 byte every 2 sec, 1016byte in 1016*2/60=33.867min
   if(timeCount%10 == 0 && timeCount != prevTime){
-    //storing the number of data samples stored in EEPROM, it will help in reading the data
-    EEPROM.write(0,++sampleCount);
-    //storing the data RPM
-    EEPROM.write(++eepromStoreAdd,int(RPM)/255);
-    EEPROM.write(++eepromStoreAdd,int(RPM)%255);
-    //storing the data inst Power
-    EEPROM.write(++eepromStoreAdd,int(P)/255);
-    EEPROM.write(++eepromStoreAdd,int(P)%255);
-    //string the current
-    EEPROM.write(++eepromStoreAdd,int(Iv));
-    //storing voltage
-    EEPROM.write(1022,int(Vv));
-    prevTime = timeCount;
+  //if(timeCount != prevTime){//to store at every seconds
+    if(eepromStoreAdd < 1016){
+      //storing the number of data samples stored in EEPROM, it will help in reading the data
+      EEPROM.write(0,++sampleCount);
+      //storing the data RPM
+      EEPROM.write(++eepromStoreAdd,int(RPM)/255);
+      EEPROM.write(++eepromStoreAdd,int(RPM)%255);
+      //storing the data inst Power
+      EEPROM.write(++eepromStoreAdd,int(P)/255);
+      EEPROM.write(++eepromStoreAdd,int(P)%255);
+      //string the current
+      EEPROM.write(++eepromStoreAdd,int(Iv));
+      prevTime = timeCount;
+    }
   }
-
+  //storing voltage at 20second
+  if(timeCount==20) EEPROM.write(1022,int(Vv));
   //Printing every parameters
   //Serial.print("Voltage:");Serial.println(Vv);
   //Serial.print("Distance:");Serial.println(dist);
