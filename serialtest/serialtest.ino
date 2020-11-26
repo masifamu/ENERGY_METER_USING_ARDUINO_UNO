@@ -38,6 +38,7 @@ static const unsigned char PROGMEM logo_bmp[] =
 #define vPerDiv     0.0048828125
 #define wheelDia    0.65//meters
 #define noOfHSCutsPerRev  266
+//#define ENABLESERIALPLOTTER
 
 int hall_signal=2;
 uint32_t timeCount=0,prevTime=0;
@@ -79,35 +80,45 @@ void setup() {
   uint16_t storedSampCount=0,temporary=0;
   if(battWireV < 10.0f){
     displayCheckWireConnectionAndReboot();
+#ifndef ENABLESERIALPLOTTER
     Serial.println("To read stored data, write :R");
+#endif
     while(1){
       if(Serial.available()){
         readValue = Serial.read();
         if(readValue == 'R'){//write R to read the data
-          
-          Serial.print("Voltage: ");Serial.print(EEPROM.read(1022));Serial.println("V");
+#ifdef ENABLESERIALPLOTTER
+          Serial.print("RPM,InstPow,Current_");
+          Serial.print(EEPROM.read(1022));Serial.print("V_");
+          Serial.print(EEPROM.read(1016)*255+EEPROM.read(1017));Serial.print("WH_");
+          Serial.print(EEPROM.read(1018)*255+EEPROM.read(1019));Serial.print("M_");
+          Serial.print(EEPROM.read(1020)*255+EEPROM.read(1021));Serial.println("m");
+#endif
+#ifndef ENABLESERIALPLOTTER
+          Serial.print("Voltage: ");Serial.print(EEPROM.read(1022));Serial.print("V, ");
           Serial.print("Energy: ");Serial.print(EEPROM.read(1016)*255+EEPROM.read(1017));Serial.println("WH");
-          Serial.print("Time: ");Serial.print(EEPROM.read(1018)*255+EEPROM.read(1019));Serial.println("M");
+          Serial.print("Time: ");Serial.print(EEPROM.read(1018)*255+EEPROM.read(1019));Serial.print("M, ");
           Serial.print("Distance: ");Serial.print(EEPROM.read(1020)*255+EEPROM.read(1021));Serial.println("m");
+#endif
           //Serial.println(".....................................................");
           storedSampCount=EEPROM.read(0)*5;//each sample is of 5 bytes
           eepromAdd=0;//starting address where the RPM,P,I is stored
           while(++eepromAdd <= storedSampCount){
-            //Serial.print(eepromAdd);Serial.println(EEPROM.read(eepromAdd));
             
             temporary = EEPROM.read(eepromAdd)*255;
             temporary += EEPROM.read(++eepromAdd);
-            Serial.print("RPM: ");Serial.println(temporary);
+            Serial.print(temporary);
 
             temporary = EEPROM.read(++eepromAdd)*255;
             temporary += EEPROM.read(++eepromAdd);
-            Serial.print("Inst Power: ");Serial.print(temporary);Serial.println("W");
+            Serial.print(",");Serial.print(temporary);
 
-            temporary = EEPROM.read(++eepromAdd);
-            Serial.print("I: ");Serial.print(temporary);Serial.println("A");
-            
+            Serial.print(",");temporary = EEPROM.read(++eepromAdd);
+            Serial.println(temporary);
           }
+#ifndef ENABLESERIALPLOTTER
           Serial.println("Done reading");
+#endif
           displayReadingDonePowerOff();
         }
       }
@@ -151,8 +162,8 @@ void loop() {
   //store current,P,RPM dynamically every 10 seconds
   //5 bytes will be consumed every 10 seconds.
   //1 byte every 2 sec, 1016byte in 1016*2/60=33.867min
-  if(timeCount%10 == 0 && timeCount != prevTime){
-  //if(timeCount != prevTime){//to store at every seconds
+  //if(timeCount%10 == 0 && timeCount != prevTime){
+  if(timeCount != prevTime){//to store at every seconds
     if(eepromStoreAdd < 1016){
       //storing the number of data samples stored in EEPROM, it will help in reading the data
       EEPROM.write(0,++sampleCount);
